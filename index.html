@@ -410,6 +410,16 @@
 
   @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   .card, .zone-detail, .stat-box, .zone-pill, .miles-card, .hero { animation: fadeUp 0.3s ease both; }
+
+  /* ── ADDITIONS ── */
+  .zone-grid .zone-pill:nth-child(5) { grid-column: span 2; }
+  .complete-btn.undo-skip { background: rgba(200,32,46,0.1); color: var(--red-light); border: 1px solid rgba(200,32,46,0.2); font-size: 13px; padding: 10px; margin-top: 8px; }
+  .export-btn { display: block; width: calc(100% - 28px); margin: 0 14px 16px; padding: 12px; border-radius: 10px; border: 1px solid rgba(77,216,236,0.25); background: rgba(26,143,160,0.1); color: var(--teal-bright); font-family: 'Oswald', sans-serif; font-weight: 600; font-size: 15px; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; }
+  .export-btn:active { opacity: 0.7; }
+  .modal-actual-row { margin-bottom: 16px; }
+  .modal-actual-row label { display: block; font-family: 'DM Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--teal-bright); opacity: 0.8; margin-bottom: 8px; }
+  .modal-actual-row input { width: 100%; background: rgba(11,31,58,0.8); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; color: var(--white); font-family: 'Oswald', sans-serif; font-size: 22px; font-weight: 600; outline: none; -webkit-appearance: none; }
+  .modal-actual-row input:focus { border-color: var(--teal-bright); }
 </style>
 </head>
 <body>
@@ -478,6 +488,7 @@
       <div class="zone-pill"><div class="zone-pill-label">Zone 2</div><div class="zone-pill-name z2c">Aerobic</div><div class="zone-pill-rpe">RPE 5–7</div></div>
       <div class="zone-pill"><div class="zone-pill-label">Zone 3</div><div class="zone-pill-name z3c">Tempo</div><div class="zone-pill-rpe">RPE 7–8</div></div>
       <div class="zone-pill"><div class="zone-pill-label">Zone 4</div><div class="zone-pill-name z4c">Threshold</div><div class="zone-pill-rpe">RPE 8–9</div></div>
+      <div class="zone-pill"><div class="zone-pill-label">Zone 5</div><div class="zone-pill-name z5c">Anaerobic</div><div class="zone-pill-rpe">RPE 10</div></div>
     </div>
   </div>
 
@@ -502,6 +513,7 @@
       <div class="stat-box"><div class="stat-num white" id="stat-done">0</div><div class="stat-label">Workouts Done</div></div>
       <div class="stat-box"><div class="stat-num white" id="stat-skipped">0</div><div class="stat-label">Skipped</div></div>
     </div>
+    <button class="export-btn" onclick="exportData()">↓ Export Training Log</button>
     <div class="section-label">Weekly Breakdown</div>
     <div class="card" id="weekly-breakdown"></div>
   </div>
@@ -515,8 +527,10 @@
     <div class="section-label">Heart Rate Calculator</div>
     <div class="hr-input-row">
       <input type="number" class="hr-input" id="max-hr" placeholder="Max HR" min="100" max="220">
+      <input type="number" class="hr-input" id="rest-hr" placeholder="Rest HR" min="30" max="120" style="opacity:0.7">
       <button class="hr-calc-btn" onclick="calcZones()">Calc</button>
     </div>
+    <div style="font-family:'DM Mono',monospace;font-size:9px;color:var(--muted);padding:0 14px 10px;letter-spacing:0.06em;">REST HR OPTIONAL — ENABLES KARVONEN METHOD</div>
     <div id="hr-results"></div>
     <div class="section-label">Zone Guide</div>
     <div class="zone-detail"><div class="zone-bar" style="background:#6ecff6"></div><div><div class="zone-detail-name z1c">Zone 1 — Recovery</div><div class="zone-detail-desc">Very easy, almost guilt-inducing. Great for full recovery days or between hard intervals.</div><div class="zone-detail-rpe z1c">RPE under 5</div></div></div>
@@ -543,6 +557,10 @@
     <div class="modal-title" id="modal-title"></div>
     <div class="modal-script" id="modal-miles"></div>
     <div class="modal-desc" id="modal-desc"></div>
+    <div class="modal-actual-row" id="modal-actual-row" style="display:none">
+      <label>Actual miles ridden</label>
+      <input type="number" id="modal-actual-input" placeholder="—" min="0" max="999" step="0.1">
+    </div>
     <div class="modal-actions" id="modal-actions"></div>
   </div>
 </div>
@@ -802,14 +820,33 @@ const weeks = [
 let completions = JSON.parse(localStorage.getItem('pmc_v4') || '{}');
 function save() { localStorage.setItem('pmc_v4', JSON.stringify(completions)); }
 function key(wi,di) { return `w${wi}_d${di}`; }
-function getStatus(wi,di) { return completions[key(wi,di)] || 'todo'; }
-function setStatus(wi,di,s) { completions[key(wi,di)] = s; save(); }
+function getStatus(wi,di) {
+  const v = completions[key(wi,di)];
+  if (!v) return 'todo';
+  return typeof v === 'string' ? v : (v.status || 'todo');
+}
+function getActualMiles(wi,di) {
+  const v = completions[key(wi,di)];
+  if (!v || typeof v === 'string') return null;
+  return v.miles != null ? v.miles : null;
+}
+function setStatus(wi,di,s,miles) {
+  if (s === 'todo') { delete completions[key(wi,di)]; }
+  else if (s === 'done' && miles != null) { completions[key(wi,di)] = { status: s, miles: +miles }; }
+  else { completions[key(wi,di)] = s; }
+  save();
+}
 
 function totalPlanned() { return weeks.reduce((s,w) => s + w.days.reduce((a,d) => a+(d.miles||0),0),0); }
 function completedMiles() {
   let t=0;
-  weeks.forEach((w,wi) => w.days.forEach((d,di) => { if(getStatus(wi,di)==='done') t+=(d.miles||0); }));
-  return t;
+  weeks.forEach((w,wi) => w.days.forEach((d,di) => {
+    if(getStatus(wi,di)==='done') {
+      const actual=getActualMiles(wi,di);
+      t += actual!=null ? actual : (d.miles||0);
+    }
+  }));
+  return Math.round(t*10)/10;
 }
 
 // ── DATES ──
@@ -850,8 +887,8 @@ function renderMiles() {
 function updateBtn(wi,di) {
   const s=getStatus(wi,di), btn=document.getElementById('today-complete-btn'), skip=document.getElementById('today-skip-btn');
   if(s==='done'){ btn.textContent='✓ Complete — Tap to Undo'; btn.className='complete-btn done'; skip.style.display='none'; }
-  else if(s==='skipped'){ btn.textContent='Skipped'; btn.className='complete-btn skipped-state'; skip.textContent='Undo skip'; skip.style.display='block'; }
-  else { btn.textContent='Mark as Complete'; btn.className='complete-btn todo'; skip.style.display='block'; skip.textContent='Mark as skipped'; }
+  else if(s==='skipped'){ btn.textContent='Skipped'; btn.className='complete-btn skipped-state'; skip.textContent='Undo Skip'; skip.className='complete-btn undo-skip'; skip.style.display='block'; }
+  else { btn.textContent='Mark as Complete'; btn.className='complete-btn todo'; skip.className='complete-btn skip'; skip.style.display='block'; skip.textContent='Mark as skipped'; }
 }
 
 function handleTodayComplete() {
@@ -894,7 +931,7 @@ function renderPlan() {
     });
     group.appendChild(header); group.appendChild(dd); container.appendChild(group);
   });
-  setTimeout(()=>{ const el=document.getElementById(`wd-${wi}`); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); },100);
+  if(renderPlan._lastWeek !== wi) { renderPlan._lastWeek=wi; setTimeout(()=>{ const el=document.getElementById(`wd-${wi}`); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); },100); }
 }
 
 function toggleWeek(wi) {
@@ -910,14 +947,34 @@ function openModal(wi,di) {
   document.getElementById('modal-eyebrow').textContent=`Week ${week.week} · ${day.label} · ${fmt(dt)}`;
   document.getElementById('modal-title').textContent=day.title;
   document.getElementById('modal-desc').textContent=day.desc;
-  document.getElementById('modal-miles').textContent=day.miles>0?`${day.miles} miles`:'';
+  document.getElementById('modal-miles').textContent=day.miles>0?`${day.miles} miles planned`:'';
+  const actualRow=document.getElementById('modal-actual-row');
+  const actualInput=document.getElementById('modal-actual-input');
+  if(day.miles>0 && s!=='skipped') {
+    actualRow.style.display='block';
+    const stored=getActualMiles(wi,di);
+    actualInput.value=stored!=null?stored:(s==='done'?day.miles:'');
+    actualInput.placeholder=`Planned: ${day.miles} mi`;
+  } else { actualRow.style.display='none'; }
   const a=document.getElementById('modal-actions');
-  if(s==='done') a.innerHTML=`<button class="modal-btn success" onclick="setMS('todo')">✓ Done — Tap to Undo</button><button class="modal-btn secondary" onclick="closeModalDirect()">Close</button>`;
+  if(s==='done') a.innerHTML=`<button class="modal-btn success" onclick="setMS('done')">✓ Done — Update Miles</button><button class="modal-btn danger" onclick="setMS('todo')">Undo Completion</button><button class="modal-btn secondary" onclick="closeModalDirect()">Close</button>`;
   else if(s==='skipped') a.innerHTML=`<button class="modal-btn primary" onclick="setMS('done')">Mark as Complete</button><button class="modal-btn danger" onclick="setMS('todo')">Remove Skip</button><button class="modal-btn secondary" onclick="closeModalDirect()">Close</button>`;
   else a.innerHTML=`<button class="modal-btn primary" onclick="setMS('done')">Mark as Complete</button><button class="modal-btn danger" onclick="setMS('skipped')">Mark as Skipped</button><button class="modal-btn secondary" onclick="closeModalDirect()">Close</button>`;
   document.getElementById('modal-overlay').classList.add('open');
 }
-function setMS(s) { if(mWi===null)return; setStatus(mWi,mDi,s); closeModalDirect(); renderToday(); renderPlan(); renderProgress(); }
+function setMS(s) {
+  if(mWi===null) return;
+  const actualRow=document.getElementById('modal-actual-row');
+  const actualInput=document.getElementById('modal-actual-input');
+  let miles=null;
+  if(s==='done' && actualRow.style.display!=='none' && actualInput.value!=='') {
+    const v=parseFloat(actualInput.value);
+    if(!isNaN(v) && v>=0) miles=v;
+  }
+  setStatus(mWi,mDi,s,miles);
+  closeModalDirect();
+  renderToday(); renderPlan(); renderProgress();
+}
 function closeModal(e) { if(e.target===document.getElementById('modal-overlay')) closeModalDirect(); }
 function closeModalDirect() { document.getElementById('modal-overlay').classList.remove('open'); }
 
@@ -934,7 +991,7 @@ function renderProgress() {
   weeks.forEach((week,wi)=>{
     const wd=week.days.map((d,i)=>({d,i})).filter(({d})=>!d.rest); if(!wd.length)return;
     const doneW=wd.filter(({i})=>getStatus(wi,i)==='done').length;
-    const miW=wd.filter(({i})=>getStatus(wi,i)==='done').reduce((s,{d})=>s+(d.miles||0),0);
+    const miW=wd.filter(({i})=>getStatus(wi,i)==='done').reduce((s,{d,i})=>{const a=getActualMiles(wi,i);return s+(a!=null?a:(d.miles||0));},0);
     const pct=wd.length?doneW/wd.length:0;
     const row=document.createElement('div'); row.className='weekly-row';
     row.innerHTML=`<div class="weekly-week">W${week.week}</div><div class="weekly-bar-wrap"><div class="weekly-bar" style="width:${pct*100}%"></div></div><div class="weekly-right"><div class="weekly-count">${doneW}/${wd.length}</div>${miW>0?`<div class="weekly-mi">${miW}mi</div>`:''}</div>`;
@@ -945,9 +1002,32 @@ function renderProgress() {
 // ── ZONES ──
 function calcZones() {
   const max=parseInt(document.getElementById('max-hr').value); if(!max||max<100||max>220)return;
+  const rest=parseInt(document.getElementById('rest-hr').value)||0;
+  const useKarvonen=rest>=30&&rest<max;
   const zones=[{name:'Z1 Recovery',min:0.5,max:0.6,color:'#6ecff6'},{name:'Z2 Aerobic',min:0.6,max:0.7,color:'#4dd8ec'},{name:'Z3 Tempo',min:0.7,max:0.8,color:'#f5c842'},{name:'Z4 Threshold',min:0.8,max:0.9,color:'#c8202e'},{name:'Z5 Anaerobic',min:0.9,max:1.0,color:'#ce93d8'}];
   const c=document.getElementById('hr-results'); c.innerHTML='';
-  zones.forEach(z=>{ const div=document.createElement('div'); div.className='hr-result'; div.innerHTML=`<div class="hr-zone-name" style="color:${z.color}">${z.name}</div><div class="hr-range">${Math.round(max*z.min)}–${Math.round(max*z.max)} <span style="color:var(--muted);font-size:11px">bpm</span></div>`; c.appendChild(div); });
+  if(useKarvonen){const note=document.createElement('div');note.style.cssText='font-family:"DM Mono",monospace;font-size:9px;color:var(--teal-bright);padding:0 0 10px;letter-spacing:.06em;opacity:.8';note.textContent='KARVONEN METHOD (HRR)';c.appendChild(note);}
+  zones.forEach(z=>{
+    const lo=useKarvonen?Math.round(rest+(max-rest)*z.min):Math.round(max*z.min);
+    const hi=useKarvonen?Math.round(rest+(max-rest)*z.max):Math.round(max*z.max);
+    const div=document.createElement('div'); div.className='hr-result';
+    div.innerHTML=`<div class="hr-zone-name" style="color:${z.color}">${z.name}</div><div class="hr-range">${lo}–${hi} <span style="color:var(--muted);font-size:11px">bpm</span></div>`;
+    c.appendChild(div);
+  });
+}
+
+// ── EXPORT ──
+function exportData() {
+  const rows=[['Week','Day','Date','Workout','Planned Miles','Status','Actual Miles']];
+  weeks.forEach((week,wi)=>week.days.forEach((day,di)=>{
+    const s=getStatus(wi,di),actual=getActualMiles(wi,di),dt=dateFor(wi,di);
+    rows.push([`W${week.week}`,day.label,fmt(dt),day.title,day.miles||0,s,actual!=null?actual:'']);
+  }));
+  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='pmc-training-log.csv'; a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ── TABS ──
@@ -963,6 +1043,11 @@ function switchTab(tab) {
 // ── INIT ──
 renderToday();
 renderProgress();
+
+// ── SERVICE WORKER ──
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+}
 </script>
 </body>
 </html>
